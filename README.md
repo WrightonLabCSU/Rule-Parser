@@ -1,2 +1,2 @@
 # Rule-Parser
-Rule Parser for various DRAM tooling
+DRAM LARK based Rule Parser for misciellaneous rules parsing tasks such as traits, summarize, and product.
