@@ -2,14 +2,13 @@ from src.rules import (
     evaluate_rules_on_anno,
     CompiledRules,
     Name,
-    Number,
+    # Number,
     And,
     Or,
     Steps,
     Call,
 )
 import polars as pl
-from io import StringIO
 from pathlib import Path
 
 DATA_DIR = Path(__file__).parent / "data"
