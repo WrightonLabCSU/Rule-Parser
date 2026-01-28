@@ -8,14 +8,17 @@ step_expr: expr ("," expr)+               -> step_
 ?or_expr: and_expr
         | or_expr "|" and_expr            -> or_
 
-?and_expr: atom
-         | and_expr "&" atom              -> and_
+?and_expr: pipe_expr
+         | and_expr "&" pipe_expr         -> and_
+
+?pipe_expr: atom
+          | pipe_expr "->" call           -> pipe_
 
 ?atom: call
      | literal
      | "[" expr "]"                       -> group
 
-call: IDENT "(" [expr ("," expr)*] ")" -> call
+call: IDENT "(" [expr ("," expr)*] ")"    -> call
 
 ?literal: name_ref
         | NUMBER                          -> number
