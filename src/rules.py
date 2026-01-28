@@ -163,12 +163,19 @@ class Call(Expr):
                     )
             case "filter_contains":
                 if n_args != 2 and n_args != 3:
-                    raise RuleError("filter_contains(column, value, contains=True) expects 2 or 3 args")
+                    raise RuleError(
+                        "filter_contains(column, value, contains=True) expects 2 or 3 args"
+                    )
             case "filter_compare":
                 if n_args != 3:
-                    raise RuleError("filter_compare(column, op, threshold) expects 3 args")
+                    raise RuleError(
+                        "filter_compare(column, op, threshold) expects 3 args"
+                    )
             case _:
-                raise RuleError(f"Unable to parse function in rules. Function: {self.value}")
+                raise RuleError(
+                    f"Unable to parse function in rules. Function: {self.value}"
+                )
+
 
 @dataclass(frozen=True)
 class Pipe(Expr):
@@ -202,7 +209,7 @@ def _as_int(e: Expr) -> int:
 
 
 def _as_bool(e: Expr) -> bool:
-    if isinstance(e,(Name, String)):
+    if isinstance(e, (Name, String)):
         name = e.value.lower()
         if name in {"true", "1", "yes", "t"}:
             return True
@@ -256,13 +263,15 @@ class ASTTransformer(Transformer):
         name = str(items[0])
         args = tuple(items[1:])
         return Call(name, args)
-    
+
     def pipe_(self, items):
         left, right = items
+
         def to_list(x):
             if isinstance(x, PipeChain):
                 return list(x.calls)
             return [x]
+
         calls = tuple(to_list(left) + to_list(right))
         return PipeChain(calls)
 
@@ -532,7 +541,7 @@ class Evaluator:
                 raise
             self._memo[expr] = out
             return out
-        
+
         if isinstance(expr, PipeChain):
             out_or_df = self.annotations
             kwargs = {"df": self.annotations, "masks": []}
@@ -580,7 +589,9 @@ class Evaluator:
         self._memo_list[expr] = mat
         return mat
 
-    def eval_call(self, call: Call, df: pl.DataFrame = None, masks: list[pl.Expr] = None) -> np.ndarray:
+    def eval_call(
+        self, call: Call, df: pl.DataFrame = None, masks: list[pl.Expr] = None
+    ) -> np.ndarray:
         fn = call.value
         args = call.args
         kwargs = {}
@@ -605,18 +616,33 @@ class Evaluator:
                     val_thr=_as_float(args[2]),
                     count_op=_as_str(args[3]),
                     count_thr=_as_float(args[4]),
-                    **kwargs
+                    **kwargs,
                 )
             case "column_sum_values":
                 return self.column_count_values(
-                    col=_as_str(args[0]), op=_as_str(args[1]), thr=_as_float(args[2]), **kwargs
+                    col=_as_str(args[0]),
+                    op=_as_str(args[1]),
+                    thr=_as_float(args[2]),
+                    **kwargs,
                 )
             case "filter_contains":
                 if len(args) == 2:
-                    return self.filter_contains(col=_as_str(args[0]), val=_as_str(args[1]), **kwargs)
-                return self.filter_contains(col=_as_str(args[0]), val=_as_str(args[1]), contains=_as_bool(args[2]), **kwargs)
+                    return self.filter_contains(
+                        col=_as_str(args[0]), val=_as_str(args[1]), **kwargs
+                    )
+                return self.filter_contains(
+                    col=_as_str(args[0]),
+                    val=_as_str(args[1]),
+                    contains=_as_bool(args[2]),
+                    **kwargs,
+                )
             case "filter_compare":
-                return self.filter_compare(col=_as_str(args[0]), op=_as_str(args[1]), thr=_as_float(args[2]), **kwargs)
+                return self.filter_compare(
+                    col=_as_str(args[0]),
+                    op=_as_str(args[1]),
+                    thr=_as_float(args[2]),
+                    **kwargs,
+                )
             case _:
                 raise RuleError(f"Unable to parse function in rules. Function: {fn}")
 
@@ -626,12 +652,20 @@ class Evaluator:
             .sort("_order")
             .drop("_order")
         )
-    
+
     def eval_filter_dec(func):
         """Decorator to evaluate filter functions with optional df and masks
-         Applies masks to the specified column before calling the function."""
+        Applies masks to the specified column before calling the function."""
+
         @functools.wraps(func)
-        def wrapper(self, col, *args,  df: pl.DataFrame = None, masks: list[pl.Expr] = None, **kwargs):
+        def wrapper(
+            self,
+            col,
+            *args,
+            df: pl.DataFrame = None,
+            masks: list[pl.Expr] = None,
+            **kwargs,
+        ):
             df = self.annotations if df is None else df
             masks = masks or []
             if masks:
@@ -639,13 +673,14 @@ class Evaluator:
                     pl.when(pl.lit(True).and_(*masks))
                     .then(pl.col(col))
                     .otherwise(pl.lit(None))
-            )
+                )
             return func(self, col, *args, df=df, **kwargs)
+
         return wrapper
 
     # Call functions
     @staticmethod
-    def not_(x: np.ndarray = None) -> np.ndarray|pl.Expr:
+    def not_(x: np.ndarray = None) -> np.ndarray | pl.Expr:
         if isinstance(x, list) and len(x) > 0 or isinstance(x, pl.Expr):
             if isinstance(x, pl.Expr):
                 x = [x]
@@ -671,7 +706,15 @@ class Evaluator:
 
     @eval_filter_dec
     def column_count_values(
-        self, col: str, val_op: str, val_thr: float, count_op: str, count_thr: float, *, df: pl.DataFrame) -> np.ndarray:
+        self,
+        col: str,
+        val_op: str,
+        val_thr: float,
+        count_op: str,
+        count_thr: float,
+        *,
+        df: pl.DataFrame,
+    ) -> np.ndarray:
         df = self.annotations if df is None else df
 
         if col not in df.columns:
@@ -703,7 +746,9 @@ class Evaluator:
         return df.select(pl.col(col)).to_series().to_numpy()
 
     @eval_filter_dec
-    def column_sum_values(self, col: str, op: str, thr: float, *, df: pl.DataFrame = None) -> np.ndarray:
+    def column_sum_values(
+        self, col: str, op: str, thr: float, *, df: pl.DataFrame = None
+    ) -> np.ndarray:
         df = self.annotations if df is None else df
 
         if col not in df.columns:
@@ -719,13 +764,17 @@ class Evaluator:
         df = self._sort_df_to_ordered_df(df)
         return df.select(pl.col(col)).to_series().to_numpy()
 
-    def filter_contains(self, col: str, val: str, df: pl.DataFrame = None, **kwargs) -> pl.DataFrame:
+    def filter_contains(
+        self, col: str, val: str, df: pl.DataFrame = None, **kwargs
+    ) -> pl.DataFrame:
         df = self.annotations if df is None else df
         if col not in df:
             raise RuleError(f"Missing column '{col}' for filter_contains()")
         return pl.col(col).str.contains(val)
-    
-    def filter_compare(self, col: str, op: str, thr: float, df: pl.DataFrame = None, **kwargs) -> pl.DataFrame:
+
+    def filter_compare(
+        self, col: str, op: str, thr: float, df: pl.DataFrame = None, **kwargs
+    ) -> pl.DataFrame:
         df = self.annotations if df is None else df
         if col not in df:
             raise RuleError(f"Missing column '{col}' for filter_compare()")
