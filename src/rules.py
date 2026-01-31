@@ -9,7 +9,7 @@ import functools
 
 import numpy as np
 import polars as pl
-from lark import Lark, Transformer
+from lark import Lark, Transformer, LarkError
 
 OP_TO_EXPR = {
     "gt": operator.gt,
@@ -89,6 +89,12 @@ class Expr:
     def validate(self):
         pass
 
+    def pprint(self):
+        """Pretty print the expression for debugging."""
+        from pprint import pprint
+
+        pprint(self)
+
 
 @dataclass(frozen=True)
 class Name(Expr):
@@ -108,14 +114,12 @@ class String(Expr):
 
 @dataclass(frozen=True)
 class And(Expr):
-    a: Expr
-    b: Expr
+    parts: Tuple[Expr, ...]
 
 
 @dataclass(frozen=True)
 class Or(Expr):
-    a: Expr
-    b: Expr
+    parts: Tuple[Expr, ...]
 
 
 @dataclass(frozen=True)
@@ -247,13 +251,14 @@ class ASTTransformer(Transformer):
         return String(s)
 
     def and_(self, items):
-        return And(items[0], items[1])
+        return And(parts=tuple(items))
 
     def or_(self, items):
-        return Or(items[0], items[1])
+        return Or(parts=tuple(items))
 
     def group(self, items):
         # square brackets are just grouping, not a node
+        assert len(items) == 1, "Grouping isn't supposed to change number of items"
         return items[0]
 
     def step_(self, items):
@@ -297,7 +302,6 @@ class CompiledRules:
             k: expand_macros(v, defs_expanded, needed_features=needed_features)
             for k, v in rules.items()
         }
-
         return cls(rules=rules_expanded, needed_features=needed_features)
 
 
@@ -338,11 +342,32 @@ def load_rules(
     with open(Path(__file__).parent.absolute() / "rules.lark") as f:
         parser = Lark(f, parser="lalr", transformer=ASTTransformer())
 
+    def parse_rule_expr(expr_str: str) -> Expr:
+        """We use a closure to capture the parser instance since
+        polars map_elements doesn't let us pass extra args."""
+        try:
+            return parser.parse(expr_str)
+        except LarkError as e:
+            n_left_b = expr_str.count("[")
+            n_right_b = expr_str.count("]")
+            if n_left_b != n_right_b:
+                raise RuleError(
+                    f"Possible mismatched brackets in rule expression: {expr_str}"
+                ) from e
+            if expr_str.count("&") > 0 and expr_str.count("|") > 0:
+                # both used; likely missing brackets
+                raise RuleError(
+                    f"Possible ambiguous use of '&' or '|' without surrounding brackets `[ ]`. Check that you don't have a situation like `A | B & C` or `A & B | C`. These are generally not allowed because they can be ambiguous. These should be written as `[A | B] & C` or `[A & B] | C`: {expr_str}."
+                ) from e
+            raise RuleError(
+                f"Error parsing rule expression for unknown reason. Possible hints could be found in the above exceptions from the parsing library Lark: {expr_str}"
+            ) from e
+
     lf = lf.with_columns(
         [
             pl.col(rules_col)
             .str.strip_chars()
-            .map_elements(parser.parse, return_dtype=pl.Object)
+            .map_elements(parse_rule_expr, return_dtype=pl.Object)
         ]
     )
 
@@ -400,9 +425,9 @@ def expand_macros(
         elif isinstance(e, (Number, String)):
             out = e
         elif isinstance(e, And):
-            out = And(recurse(e.a), recurse(e.b))
+            out = And(parts=tuple(recurse(part) for part in e.parts))
         elif isinstance(e, Or):
-            out = Or(recurse(e.a), recurse(e.b))
+            out = Or(parts=tuple(recurse(part) for part in e.parts))
         elif isinstance(e, Steps):
             out = Steps(tuple(recurse(p) for p in e.parts))
         elif isinstance(e, Call):
@@ -529,13 +554,18 @@ class Evaluator:
             return out
 
         if isinstance(expr, And):
-            out = np.logical_and(self.eval_bool(expr.a), self.eval_bool(expr.b))
+            out = np.all(
+                np.stack([self.eval_bool(part) for part in expr.parts], axis=0), axis=0
+            )
             self._memo[expr] = out
             return out
 
         if isinstance(expr, Or):
             try:
-                out = np.logical_or(self.eval_bool(expr.a), self.eval_bool(expr.b))
+                out = np.any(
+                    np.stack([self.eval_bool(part) for part in expr.parts], axis=0),
+                    axis=0,
+                )
             except ValueError as e:
                 print(f"Error evaluating OR expression: {expr}")
                 raise
@@ -565,10 +595,10 @@ class Evaluator:
 
         if isinstance(expr, Steps):
             raise RuleError(
-                f"Step expressions (expression seperated by commas)"
+                "Step expressions (expression seperated by commas)"
                 " logic cannot be evaluted on their own. They must be used"
                 " in a supporting function such as `percent`. Offending"
-                " rule: {expr}"
+                f" rule: {expr}"
             )
 
         raise RuleError(
