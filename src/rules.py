@@ -361,8 +361,8 @@ def load_rules(
     rules_path: str = None,
     rules: pl.LazyFrame = None,
     label_col: str = "name",
-    parent_col: str = "parent",
-    rules_col: str = "child",
+    parent_col: str = "alias",
+    rules_col: str = "rule",
     allow_visualize_functions: bool = False,
 ) -> Tuple[Dict[str, Expr], Dict[str, Expr]]:
     """
